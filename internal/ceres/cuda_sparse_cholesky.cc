@@ -46,6 +46,23 @@
 #include "ceres/linear_solver.h"
 #include "cudss.h"
 
+// cuDSS 0.8.0 renamed cudaDataType_t / CUDA_R_* to cudssDataType_t / CUDSS_R_*
+// and added an `offsetType` parameter to cudssMatrixCreateCsr(). The shims
+// below let the same source compile against pre-0.8 and 0.8+ headers; remove
+// once the minimum supported cuDSS version is 0.8.0.
+// See: https://docs.nvidia.com/cuda/cudss/migration_guide.html
+#if defined(CUDSS_VERSION) && CUDSS_VERSION >= 800
+using CeresCuDSSDataType = cudssDataType_t;
+#define CERES_CUDSS_R_32F CUDSS_R_32F
+#define CERES_CUDSS_R_64F CUDSS_R_64F
+#define CERES_CUDSS_R_32I CUDSS_R_32I
+#else
+using CeresCuDSSDataType = cudaDataType_t;
+#define CERES_CUDSS_R_32F CUDA_R_32F
+#define CERES_CUDSS_R_64F CUDA_R_64F
+#define CERES_CUDSS_R_32I CUDA_R_32I
+#endif
+
 namespace ceres::internal {
 
 inline std::string cuDSSStatusToString(cudssStatus_t status) {
@@ -120,8 +137,8 @@ class CERES_NO_EXPORT CuDSSMatrixCSR : public CuDSSMatrixBase {
                       void* rows_end,
                       void* cols,
                       void* values,
-                      cudaDataType_t index_type,
-                      cudaDataType_t value_type,
+                      CeresCuDSSDataType index_type,
+                      CeresCuDSSDataType value_type,
                       cudssMatrixType_t matrix_type,
                       cudssMatrixViewType_t matrix_storage_type,
                       cudssIndexBase_t index_base) {
@@ -135,6 +152,9 @@ class CERES_NO_EXPORT CuDSSMatrixCSR : public CuDSSMatrixBase {
                                 rows_end,
                                 cols,
                                 values,
+#if defined(CUDSS_VERSION) && CUDSS_VERSION >= 800
+                                index_type,
+#endif
                                 index_type,
                                 value_type,
                                 matrix_type,
@@ -149,7 +169,7 @@ class CERES_NO_EXPORT CuDSSMatrixDense : public CuDSSMatrixBase {
                       int64_t num_cols,
                       int64_t leading_dimension_size,
                       void* values,
-                      cudaDataType_t value_type,
+                      CeresCuDSSDataType value_type,
                       cudssLayout_t layout) {
     CUDSS_STATUS_OK_OR_RETURN_CUDSS_STATUS(Free());
 
@@ -187,8 +207,8 @@ class CERES_NO_EXPORT CudaSparseCholeskyImpl final : public SparseCholesky {
  public:
   static_assert(std::is_same_v<Scalar, float> || std::is_same_v<Scalar, double>,
                 "Scalar type is unsupported by cuDSS");
-  static constexpr cudaDataType_t kCuDSSScalar =
-      std::is_same_v<Scalar, float> ? CUDA_R_32F : CUDA_R_64F;
+  static constexpr CeresCuDSSDataType kCuDSSScalar =
+      std::is_same_v<Scalar, float> ? CERES_CUDSS_R_32F : CERES_CUDSS_R_64F;
 
   CudaSparseCholeskyImpl(ContextImpl* context)
       : context_(context),
@@ -377,7 +397,7 @@ class CERES_NO_EXPORT CudaSparseCholeskyImpl final : public SparseCholesky {
                                                            nullptr,
                                                            lhs_cols_d_.data(),
                                                            lhs_values_d_.data(),
-                                                           CUDA_R_32I,
+                                                           CERES_CUDSS_R_32I,
                                                            kCuDSSScalar,
                                                            CUDSS_MTYPE_SPD,
                                                            CUDSS_MVIEW_LOWER,
